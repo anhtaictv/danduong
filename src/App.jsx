@@ -15,6 +15,7 @@ const DETAIL_SPAN = 0.12 // độ (~13 km): dưới mức này tải cả đư�
 const PROVINCE = 'Tỉnh Đắk Lắk'
 const BMT = [12.6667, 108.0383] // TP Buôn Ma Thuột
 const MAX_SEGS = 40000 // số cạnh tối đa khi vẽ quá trình tìm kiếm
+const C = { tree: '#1e88ff', path: '#ffe600', tree2: '#d946ef', path2: '#a21caf' } // màu: thuật toán chính / thuật toán so sánh
 
 export default function App() {
   const [tab, setTab] = useState('route')
@@ -82,27 +83,27 @@ export default function App() {
     }
   }
 
-  const sel = results?.[algo]
+  const [cmp, setCmp] = useState('') // thuật toán vẽ chồng để so sánh, '' = tắt
+  const sel = results?.[algo], other = cmp !== algo ? results?.[cmp] : null
   const [step, setStep] = useState(0)
   const [replay, setReplay] = useState(0)
   const [dur, setDur] = useState(3) // số giây vẽ quá trình tìm kiếm (chậm lại khi trình bày)
-  // Cây duyệt có thể tới hàng triệu cạnh (IDS) → lấy mẫu đều tối đa MAX_SEGS cạnh để vẽ cho mượt
-  const segs = useMemo(() => {
-    if (!sel) return null
-    const tr = sel.tree, n = tr.length / 2, k = Math.ceil(n / MAX_SEGS), out = []
-    for (let i = 0; i < n; i += k) { const a = tr[2 * i], b = tr[2 * i + 1]; out.push([[graph.lat[a], graph.lon[a]], [graph.lat[b], graph.lon[b]]]) }
-    return out
-  }, [sel, graph])
-  // Vẽ dần các cạnh đã duyệt trong `dur` giây, xong mới hiện đường đi
+  const segs = useMemo(() => sel && sample(sel.tree, graph), [sel, graph])
+  const segs2 = useMemo(() => other && sample(other.tree, graph), [other, graph])
+  // step = số cạnh cây đã vẽ, cả 2 thuật toán cùng tốc độ → thuật toán duyệt ít xong trước. Vẽ xong mới hiện đường đi.
+  const total = Math.max(sel?.tree.length ?? 0, other?.tree.length ?? 0) / 2
   useEffect(() => {
-    if (!segs) return
-    const total = segs.length, inc = Math.max(1, Math.ceil(total / (dur * 60)))
+    if (!total) return
+    const inc = Math.max(1, Math.ceil(total / (dur * 60)))
     let n = 0, id
     const tick = () => { n = Math.min(total, n + inc); setStep(n); if (n < total) id = requestAnimationFrame(tick) }
     setStep(0); id = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(id)
-  }, [segs, replay, dur])
-  const searching = segs && step < segs.length
+  }, [total, sel, other, replay, dur])
+  const searching = step < total
+  const done = r => step >= r.tree.length / 2
+  const progress = r => Math.round(r.expanded * Math.min(1, step / (r.tree.length / 2 || 1)))
+  const km = r => (r.cost / 1000).toFixed(2) + ' km'
   const best = results && Math.min(Infinity, ...Object.values(results).map(r => r.cost))
 
   return (
@@ -130,7 +131,8 @@ export default function App() {
             <thead><tr><th>Thuật toán</th><th>km</th><th>Đỉnh mở rộng</th><th>ms</th></tr></thead>
             <tbody>{Object.keys(ALGORITHMS).map(name => { const r = results[name]
               return !r ? <tr key={name}><td>{name}</td><td colSpan="3">đang chạy...</td></tr> :
-              <tr key={name} className={name === algo ? 'sel' : ''} onClick={() => { setAlgo(name); setReplay(x => x + 1) }}>
+              <tr key={name} className={name === algo ? 'sel' : name === cmp ? 'cmp' : ''}
+                onClick={() => { setAlgo(name); if (name === cmp) setCmp(''); setReplay(x => x + 1) }}>
                 <td>{name}{r.path && Math.abs(r.cost - best) < 1e-6 && ' ★'}</td>
                 <td>{r.path ? (r.cost / 1000).toFixed(2) : '—'}</td>
                 <td>{r.expanded}</td>
@@ -138,7 +140,13 @@ export default function App() {
               </tr> })}
             </tbody>
           </table>}
-          {results && <p className="hint">★ = ngắn nhất. Click một dòng để xem quá trình tìm kiếm (xanh) và đường đi (vàng) của thuật toán đó.</p>}
+          {results && <p className="hint">★ = ngắn nhất. Click một dòng để xem quá trình tìm kiếm của thuật toán đó; chọn "So sánh với" để vẽ chồng thêm một thuật toán (màu tím).</p>}
+          {results && <label className="row">So sánh với
+            <select value={cmp} onChange={e => { setCmp(e.target.value); setReplay(x => x + 1) }}>
+              <option value="">Không</option>
+              {Object.keys(ALGORITHMS).filter(n => n !== algo).map(n => <option key={n}>{n}</option>)}
+            </select>
+          </label>}
           {results && <label className="row">Tốc độ vẽ
             <select value={dur} onChange={e => setDur(+e.target.value)}>
               <option value="3">Nhanh (3 giây)</option>
@@ -146,11 +154,14 @@ export default function App() {
               <option value="30">Chậm (30 giây)</option>
             </select>
           </label>}
-          {sel && <p className="hint">{algo}: đã mở rộng {Math.round(sel.expanded * step / (segs.length || 1))} / {sel.expanded} đỉnh
+          {sel && <p className="hint">{algo}: đã mở rộng {progress(sel)} / {sel.expanded} đỉnh
+            {other && <><br />{cmp}: đã mở rộng {progress(other)} / {other.expanded} đỉnh</>}
             {!searching && <> · <a href="#" onClick={e => { e.preventDefault(); setReplay(x => x + 1) }}>Xem lại</a></>}</p>}
         </> : <Classifier />}
       </aside>
 
+      <div className="mapwrap">
+      <Legend graph={graph} algo={sel && algo} cmp={other && cmp} />
       <MapContainer center={BMT} zoom={13} className="map" preferCanvas>
         <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           attribution="&copy; OpenStreetMap contributors" />
@@ -158,14 +169,16 @@ export default function App() {
         <ClickPicker onPick={pick} />
         <Prefetcher onProgress={setBg} />
         {graph && <Polyline positions={graph.ways} pathOptions={{ color: '#555', weight: 1, opacity: 0.4 }} />}
-        {sel && <Polyline positions={segs.slice(0, step)} pathOptions={{ color: '#1e88ff', weight: 2, opacity: 0.9 }} />}
+        {[[sel, segs, C.tree, algo], [other, segs2, C.tree2, cmp]].filter(x => x[0])
+          .sort((a, b) => b[0].tree.length - a[0].tree.length) // cây lớn vẽ dưới để không che cây nhỏ
+          .map(([r, s, color, name], i) =>
+            <Polyline key={name + i} positions={s.segs.slice(0, Math.ceil(step / s.k))} pathOptions={{ color, weight: 2, opacity: 0.9 }} />)}
         {sel?.line && <FitTo line={sel.line} />}
-        {sel?.line && !searching && <>
-          <Polyline positions={sel.line} pathOptions={{ color: '#222', weight: 9, opacity: 0.7 }} />
-          <Polyline key={'y' + algo + replay} positions={sel.line} pathOptions={{ color: '#ffe600', weight: 5 }}>
-            <Tooltip permanent direction="center">{(sel.cost / 1000).toFixed(2)} km</Tooltip>
-          </Polyline>
-        </>}
+        {other?.line && done(other) &&
+          <PathLine key={'c' + cmp + replay} line={other.line} color={C.path2} label={`${cmp}: ${km(other)}`} dir="top" width={9} />}
+        {/* canvas vẽ theo thứ tự thêm vào → key đổi khi đường so sánh hiện, để đường chính thêm lại và nằm trên */}
+        {sel?.line && done(sel) &&
+          <PathLine key={'y' + algo + replay + !!(other?.line && done(other))} line={sel.line} color={C.path} label={other ? `${algo}: ${km(sel)}` : km(sel)} dir={other ? 'bottom' : 'center'} />}
         {start && <Marker position={[start.lat, start.lon]} icon={START_ICON} draggable
           eventHandlers={{ dragend: e => { const p = e.target.getLatLng(); setStart({ lat: p.lat, lon: p.lng, name: 'Điểm đã chọn' }); reset() } }}>
           <Tooltip>Điểm đi</Tooltip></Marker>}
@@ -173,8 +186,42 @@ export default function App() {
           eventHandlers={{ dragend: e => { const p = e.target.getLatLng(); setEnd({ lat: p.lat, lon: p.lng, name: 'Điểm đã chọn' }); reset() } }}>
           <Tooltip>Điểm đến</Tooltip></Marker>}
       </MapContainer>
+      </div>
     </div>
   )
+}
+
+// Cây duyệt có thể tới hàng triệu cạnh (IDS) → lấy mẫu đều tối đa MAX_SEGS cạnh để vẽ cho mượt; k = số cạnh thật mỗi đoạn vẽ
+function sample(tr, g) {
+  const n = tr.length / 2, k = Math.max(1, Math.ceil(n / MAX_SEGS)), segs = []
+  for (let i = 0; i < n; i += k) { const a = tr[2 * i], b = tr[2 * i + 1]; segs.push([[g.lat[a], g.lon[a]], [g.lat[b], g.lon[b]]]) }
+  return { segs, k }
+}
+
+// Đường so sánh vẽ to hơn (width 9) → trùng với đường chính thì thành viền tím quanh đường vàng
+function PathLine({ line, color, label, dir, width = 5 }) {
+  return <>
+    <Polyline positions={line} pathOptions={{ color: '#222', weight: width + 4, opacity: 0.7 }} />
+    <Polyline positions={line} pathOptions={{ color, weight: width }}>
+      <Tooltip permanent direction={dir}>{label}</Tooltip>
+    </Polyline>
+  </>
+}
+
+// Chú thích màu (nằm ngoài MapContainer nên click vào không chọn điểm trên bản đồ)
+function Legend({ graph, algo, cmp }) {
+  const line = (background, extra) => ({ background, ...extra })
+  const row = (style, text) => <li key={text}><i style={style} />{text}</li>
+  return <ul className="legend">
+    {row(line('#16a34a', { height: 12, width: 12, borderRadius: '50%' }), 'A · Điểm đi')}
+    {row(line('#dc2626', { height: 12, width: 12, borderRadius: '50%' }), 'B · Điểm đến')}
+    {row(line('none', { height: 0, borderTop: '2px dashed #d00' }), 'Ranh giới tỉnh')}
+    {graph && row(line('#555', { opacity: 0.5, height: 2 }), 'Mạng đường đã tải')}
+    {algo && row(line(C.tree), `${algo} · đỉnh đã duyệt`)}
+    {algo && row(line(C.path, { outline: '2px solid #222' }), `${algo} · đường đi`)}
+    {cmp && row(line(C.tree2), `${cmp} · đỉnh đã duyệt`)}
+    {cmp && row(line(C.path2, { outline: '2px solid #222' }), `${cmp} · đường đi`)}
+  </ul>
 }
 
 function ClickPicker({ onPick }) {
