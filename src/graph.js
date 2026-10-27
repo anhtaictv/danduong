@@ -131,14 +131,32 @@ export function buildGraph(elements) {
       if (ow <= 0) g.adj[b].push([a, w])
     }
   }
+  g.main = mainComponent(g.adj)
   return g
+}
+
+// Thành phần liên thông mạnh chính (main[u] = 3): đoạn đường lẻ nối vào mạng qua đường không tải (service, ngõ)
+// hoặc bị đường một chiều chặn thì không đi được → không ghim A/B vào đó
+// ponytail: gốc = đỉnh nhiều cạnh nhất, coi như nằm trong mạng chính; đổi sang Tarjan nếu gặp vùng chọn sai gốc
+function mainComponent(adj) {
+  const n = adj.length, radj = adj.map(() => []), main = new Uint8Array(n)
+  if (!n) return main
+  adj.forEach((nb, u) => nb.forEach(([v]) => radj[v].push(u)))
+  let root = 0
+  for (let u = 1; u < n; u++) if (adj[u].length + radj[u].length > adj[root].length + radj[root].length) root = u
+  for (const [nbs, bit] of [[adj, 1], [radj, 2]]) {
+    const q = [root]; main[root] |= bit
+    for (let h = 0; h < q.length; h++)
+      for (const e of nbs[q[h]]) { const v = bit === 1 ? e[0] : e; if (!(main[v] & bit)) { main[v] |= bit; q.push(v) } }
+  }
+  return main
 }
 
 export function nearest(g, lat, lon) {
   let best = -1, bd = Infinity
   for (let i = 0; i < g.lat.length; i++) {
     const d = (g.lat[i] - lat) ** 2 + (g.lon[i] - lon) ** 2
-    if (d < bd && g.adj[i].length) { bd = d; best = i }
+    if (d < bd && g.main[i] === 3) { bd = d; best = i }
   }
   return best
 }
