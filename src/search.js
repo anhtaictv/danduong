@@ -83,31 +83,48 @@ export function dfs(g, s, t) {
 }
 
 // DLS: DFS giới hạn độ sâu `limit` (số cạnh). Cho phép thăm lại đỉnh nếu đến được ở độ sâu nhỏ hơn.
-export function dls(g, s, t, limit) {
-  const n = g.adj.length, prev = new Int32Array(n).fill(-1), best = new Int32Array(n).fill(0x7fffffff)
-  const st = [[s, 0]], tree = []; best[s] = 0
+// noTree: IDS bỏ ghi cây ở các vòng trung gian. Stack phẳng [đỉnh, độ sâu, ...] để khỏi tạo mảng con (vòng lặp nóng của IDS).
+// Danh sách kề dạng phẳng (CSR): láng giềng của u là to[off[u] .. off[u+1]), tạo 1 lần cho mỗi đồ thị
+const csrCache = new WeakMap()
+function csr(g) {
+  let c = csrCache.get(g)
+  if (c) return c
+  const n = g.adj.length, off = new Int32Array(n + 1)
+  for (let u = 0; u < n; u++) off[u + 1] = off[u] + g.adj[u].length
+  const to = new Int32Array(off[n])
+  for (let u = 0; u < n; u++) g.adj[u].forEach((e, i) => { to[off[u] + i] = e[0] })
+  csrCache.set(g, c = { off, to })
+  return c
+}
+
+export function dls(g, s, t, limit, noTree) {
+  const n = g.adj.length, { off, to } = csr(g), prev = new Int32Array(n).fill(-1), best = new Int32Array(n).fill(0x7fffffff)
+  const st = [s, 0], tree = []; best[s] = 0
   let expanded = 0, cutoff = false
   while (st.length) {
-    const [u, d] = st.pop()
+    const d = st.pop(), u = st.pop()
     if (d > best[u]) continue
     expanded++
-    if (prev[u] >= 0) tree.push(prev[u], u)
-    if (u === t) return result(g, trace(prev, s, t), expanded, tree, { cutoff })
+    if (!noTree && prev[u] >= 0) tree.push(prev[u], u)
+    if (u === t) return noTree ? { found: true, expanded } : result(g, trace(prev, s, t), expanded, tree, { cutoff })
     if (d === limit) { cutoff = true; continue }
-    for (const [v] of g.adj[u]) if (d + 1 < best[v]) { best[v] = d + 1; prev[v] = u; st.push([v, d + 1]) }
+    for (let i = off[u], end = off[u + 1]; i < end; i++) {
+      const v = to[i]
+      if (d + 1 < best[v]) { best[v] = d + 1; prev[v] = u; st.push(v, d + 1) }
+    }
   }
-  return result(g, null, expanded, tree, { cutoff })
+  return noTree ? { found: false, cutoff, expanded } : result(g, null, expanded, tree, { cutoff })
 }
 
 // ponytail: IDS tăng limit từng bước 1, O(depth × E); đủ cho phạm vi quận/huyện
 export function ids(g, s, t, maxDepth = 5000) {
-  let expanded = 0, r
+  let expanded = 0
   for (let limit = 0; limit <= maxDepth; limit++) {
-    r = dls(g, s, t, limit)
+    const r = dls(g, s, t, limit, true)
     expanded += r.expanded
-    if (r.path || !r.cutoff) return { ...r, expanded, depth: limit } // tree = lần lặp cuối
+    if (r.found || !r.cutoff) return { ...dls(g, s, t, limit), expanded, depth: limit } // chạy lại vòng cuối để lấy path + tree
   }
-  return result(g, null, expanded, r?.tree ?? [])
+  return result(g, null, expanded, [])
 }
 
 function bestFirst(g, s, t, f) {
