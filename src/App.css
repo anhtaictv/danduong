@@ -39,3 +39,6 @@ pre { font-size: 12px; background: #fff; padding: 8px; border: 1px solid #ddd; o
 .legend { position: absolute; left: 10px; bottom: 24px; z-index: 1000; margin: 0; padding: 8px 10px; list-style: none; background: rgba(255,255,255,.92); border-radius: 6px; box-shadow: 0 1px 5px rgba(0,0,0,.3); font-size: 13px; }
 .legend li { display: flex; align-items: center; gap: 8px; margin: 3px 0; }
 .legend i { width: 22px; height: 4px; flex: none; }
+.bar { display: grid; grid-template-columns: 110px 1fr 75px; align-items: center; gap: 6px; font-size: 12px; margin: 3px 0; }
+.bar i { height: 12px; min-width: 2px; border-radius: 3px; }
+.bar b { font-weight: 400; text-align: right; }

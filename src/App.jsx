@@ -140,6 +140,7 @@ export default function App() {
               </tr> })}
             </tbody>
           </table>}
+          {results && <Bars results={results} algo={algo} cmp={other && cmp} />}
           {results && <p className="hint">★ = ngắn nhất. Click một dòng để xem quá trình tìm kiếm của thuật toán đó; chọn "So sánh với" để vẽ chồng thêm một thuật toán (màu tím).</p>}
           {results && <label className="row">So sánh với
             <select value={cmp} onChange={e => { setCmp(e.target.value); setReplay(x => x + 1) }}>
@@ -206,6 +207,20 @@ function PathLine({ line, color, label, dir, width = 5 }) {
       <Tooltip permanent direction={dir}>{label}</Tooltip>
     </Polyline>
   </>
+}
+
+// Biểu đồ cột số đỉnh mở rộng. Thang log vì IDS có thể gấp hàng nghìn lần Greedy (thang thường thì các cột khác gần như bằng 0).
+function Bars({ results, algo, cmp }) {
+  const names = Object.keys(ALGORITHMS).filter(n => results[n])
+  const max = Math.log10(Math.max(10, ...names.map(n => results[n].expanded)))
+  return <div>
+    <p className="hint">Số đỉnh mở rộng (thang logarit, cột càng ngắn càng ít việc)</p>
+    {names.map(n => { const e = results[n].expanded
+      return <div key={n} className="bar"><span>{n}</span>
+        <i style={{ width: Math.log10(Math.max(1, e)) / max * 100 + '%', background: n === algo ? C.tree : n === cmp ? C.tree2 : '#bbb' }} />
+        <b>{e.toLocaleString('vi-VN')}</b>
+      </div> })}
+  </div>
 }
 
 // Chú thích màu (nằm ngoài MapContainer nên click vào không chọn điểm trên bản đồ)
