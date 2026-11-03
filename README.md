@@ -2,6 +2,8 @@
 
 Ứng dụng web minh họa **các thuật toán tìm kiếm** trên bản đồ đường bộ thật (tỉnh Đắk Lắk, dữ liệu OpenStreetMap) và **các thuật toán phân loại văn bản** tiếng Việt. Ứng dụng cho thấy trực quan từng thuật toán duyệt đồ thị ra sao, mở rộng bao nhiêu đỉnh và tìm được đường dài bao nhiêu, đồng thời so sánh độ chính xác của ba mô hình phân loại.
 
+**Dùng thử ngay trên trình duyệt:** https://anhtaictv.github.io/danduong/ (không cần cài đặt). Bản chạy trên Windows: tải `danduong.exe` ở mục [Releases](https://github.com/anhtaictv/danduong/releases/latest).
+
 Công nghệ: React 19, Leaflet (react-leaflet), Vite, Web Worker. Dữ liệu bản đồ lấy từ OpenStreetMap (Overpass API), tìm địa điểm bằng Nominatim.
 
 ---
@@ -84,6 +86,10 @@ npm run preview    # xem thử bản build
 node test.mjs      # kiểm tra thuật toán
 npm run exe        # đóng gói thành release/danduong.exe
 ```
+
+### Bản web (GitHub Pages)
+
+Mỗi lần push lên `main`, workflow `.github/workflows/deploy.yml` chạy kiểm thử, build và đăng lại trang tại https://anhtaictv.github.io/danduong/. Vite dùng `base: './'` (đường dẫn tương đối) nên cùng một bản build chạy được cả ở thư mục con của GitHub Pages lẫn trong file exe.
 
 ### Chạy bằng file .exe (không cần cài Node)
 
@@ -218,6 +224,8 @@ ID3 thấp hơn vì với ít dữ liệu, mỗi nhánh chỉ dựa vào sự c�
 
 ```
 danduong/
+├── .github/workflows/
+│   └── deploy.yml         Build và đăng lên GitHub Pages khi push main
 ├── index.html
 ├── package.json
 ├── vite.config.js
