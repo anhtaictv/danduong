@@ -53,7 +53,7 @@ const tilesOf = ([s, w, n, e]) => {
 }
 const store = () => caches.open('osm-tiles')
 let local // promise các phần tử của file tải sẵn, chỉ đọc 1 lần
-const loadLocal = () => (local ??= fetch('/osm-bmt.json')
+const loadLocal = () => (local ??= fetch(import.meta.env.BASE_URL + 'osm-bmt.json')
   .then(r => r.ok ? r.json() : Promise.reject(new Error('Không có file tải sẵn')))
   .catch(e => { local = null; throw e }))
 
