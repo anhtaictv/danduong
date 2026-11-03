@@ -71,6 +71,7 @@ export default function App() {
       setResults(res)
       w.onmessage = ({ data }) => {
         if (worker.current !== w) return
+        if (data.error) { w.terminate(); return setStatus(`Lỗi khi chạy ${data.name}: ${data.error}`) }
         if (data.done) {
           w.terminate()
           return setStatus(res.UCS.path ? '' : 'Không tìm được đường (có thể do đường một chiều hoặc vùng bị tách rời).')
@@ -80,11 +81,12 @@ export default function App() {
         setResults({ ...res })
         if (data.name !== 'IDS' && !res.IDS) setStatus('Đang chạy IDS (có thể mất vài chục giây với quãng đường dài)...')
       }
-      w.onerror = e => setStatus('Lỗi: ' + e.message)
+      // ErrorEvent của worker thường không có message (không tải được file worker, hết bộ nhớ...) → ghi rõ thay vì "undefined"
+      w.onerror = e => { e.preventDefault?.(); if (worker.current === w) setStatus('Lỗi khi chạy thuật toán: ' + (e.message || 'không khởi động được Web Worker hoặc trình duyệt hết bộ nhớ. Hãy tải lại trang (Ctrl+F5) rồi thử lại.')) }
       setResTime(byTime)
       w.postMessage({ g: { lat: g.lat, lon: g.lon, adj: g.adj }, s, t, limit: +limit, w: +wA, byTime })
     } catch (e) {
-      setStatus('Lỗi: ' + e.message)
+      setStatus('Lỗi: ' + (e?.message || String(e)))
     }
   }
 
