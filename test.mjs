@@ -1,8 +1,9 @@
 // node test.mjs — kiểm tra thuật toán tìm đường và phân loại
 import assert from 'node:assert'
 import { ALGORITHMS } from './src/search.js'
-import { buildGraph, nearest } from './src/graph.js'
-import { CLASSIFIERS, looAccuracy } from './src/classify.js'
+import { buildGraph, nearest, timeGraph } from './src/graph.js'
+import { CLASSIFIERS, looAccuracy, looPredict, evaluate } from './src/classify.js'
+import { runSteps } from './src/stepper.js'
 import { DOCS } from './src/docs.js'
 
 // Lưới 4x4, đường chéo dài 0-5-10-15 hai chiều; đường 0→3 một chiều
@@ -29,9 +30,25 @@ assert.equal(ALGORITHMS.DLS(g, s, t, { limit: 5 }).path, null) // cần 6 cạnh
 assert.equal(ALGORITHMS.IDS(g, s, t).depth, 6)
 assert.notDeepEqual(ALGORITHMS.UCS(g, back, s).path, [back, id(2), id(1), s]) // một chiều: không đi ngược hàng 0
 
+// Chế độ thời gian: h = chim bay / VMAX vẫn chấp nhận được → A* vẫn tối ưu như UCS
+const tg = timeGraph(g)
+assert(Math.abs(ALGORITHMS['A*'](tg, s, t).cost - ALGORITHMS.UCS(tg, s, t).cost) < 1e-6)
+assert(ALGORITHMS['Weighted A*'](g, s, t, { w: 3 }).cost <= 3 * opt + 1e-6)
+
+// Đồ thị nhỏ của tab "Từng bước" (số liệu dùng trong báo cáo)
+const run = (a, o) => runSteps(a, o)
+assert.deepEqual(run('BFS').path, ['S', 'B', 'G']); assert.equal(run('BFS').cost, 9)
+assert.deepEqual(run('DFS').path, ['S', 'C', 'E', 'G']); assert.equal(run('DFS').cost, 14)
+assert.equal(run('DLS', { limit: 1 }).path, null)
+assert.equal(run('IDS').steps.length, 12)
+assert.deepEqual(run('UCS').path, ['S', 'A', 'D', 'G']); assert.equal(run('UCS').expanded, 7)
+assert.deepEqual(run('A*').path, ['S', 'A', 'D', 'G']); assert.equal(run('A*').expanded, 4)
+assert.equal(run('Greedy Best-First').cost, 9)
+
 for (const [name, train] of Object.entries(CLASSIFIERS)) {
   const acc = looAccuracy(train, DOCS)
   console.log(name, 'LOO accuracy', acc.toFixed(2))
+  assert.equal(evaluate(DOCS, looPredict(train, DOCS)).accuracy, acc)
   assert(acc > 0.4, name)
 }
 assert.equal(CLASSIFIERS['Naive Bayes'](DOCS)('cầu thủ ghi bàn trong trận đấu'), 'Thể thao')

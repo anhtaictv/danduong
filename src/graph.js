@@ -108,6 +108,21 @@ export async function fetchGraph(bbox, majorOnly) {
   return buildGraph(els ?? await overpass(bbox, majorOnly ? MAJOR : ALL))
 }
 
+// Tốc độ giả định (km/h) theo loại đường, dùng cho chế độ tối ưu theo thời gian
+export const SPEED = {
+  motorway: 80, trunk: 70, primary: 60, secondary: 50, tertiary: 40,
+  motorway_link: 40, trunk_link: 40, primary_link: 40, secondary_link: 35, tertiary_link: 30,
+  unclassified: 30, residential: 25, living_street: 15,
+}
+const VMAX = Math.max(...Object.values(SPEED))
+
+// Đồ thị trọng số = thời gian (giây). h = chim bay / VMAX ≤ thời gian thật vì không cạnh nào đi nhanh hơn VMAX
+export const timeGraph = g => ({
+  lat: g.lat, lon: g.lon, hScale: 3.6 / VMAX,
+  adj: g.adj.map(nb => nb.map(([v, w, sp]) => [v, w / (sp / 3.6)])),
+})
+
+// adj[u] = [[v, mét, km/h], ...]
 export function buildGraph(elements) {
   const coord = new Map(), index = new Map(), g = { lat: [], lon: [], adj: [], ways: [] }
   for (const el of elements) if (el.type === 'node') coord.set(el.id, [el.lat, el.lon])
@@ -123,12 +138,13 @@ export function buildGraph(elements) {
     const t = el.tags || {}
     const ow = t.oneway === '-1' ? -1
       : ['yes', 'true', '1'].includes(t.oneway) || t.junction === 'roundabout' || t.highway === 'motorway' ? 1 : 0
+    const sp = SPEED[t.highway] ?? 30
     const ns = el.nodes.filter(id => coord.has(id)).map(idx)
     g.ways.push(ns.map(i => [g.lat[i], g.lon[i]]))
     for (let i = 1; i < ns.length; i++) {
       const a = ns[i - 1], b = ns[i], w = haversine(g.lat[a], g.lon[a], g.lat[b], g.lon[b])
-      if (ow >= 0) g.adj[a].push([b, w])
-      if (ow <= 0) g.adj[b].push([a, w])
+      if (ow >= 0) g.adj[a].push([b, w, sp])
+      if (ow <= 0) g.adj[b].push([a, w, sp])
     }
   }
   g.main = mainComponent(g.adj)

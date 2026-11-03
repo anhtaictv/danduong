@@ -92,11 +92,26 @@ export function decisionTree(docs, maxDepth = 8) {
 
 export const CLASSIFIERS = { 'Naive Bayes': naiveBayes, kNN: knn, 'Decision Tree': decisionTree }
 
-// Độ chính xác leave-one-out
+// Leave-one-out: mỗi tài liệu được dự đoán bởi mô hình huấn luyện trên các tài liệu còn lại
+export const looPredict = (train, docs) => docs.map(([, t], i) => train(docs.filter((_, j) => j !== i))(t))
+
 export function looAccuracy(train, docs) {
-  let ok = 0
-  docs.forEach(([y, t], i) => { if (train(docs.filter((_, j) => j !== i))(t) === y) ok++ })
-  return ok / docs.length
+  const p = looPredict(train, docs)
+  return p.filter((y, i) => y === docs[i][0]).length / docs.length
+}
+
+// Ma trận nhầm lẫn m[thật][dự đoán] + precision/recall/F1 từng nhãn
+export function evaluate(docs, preds) {
+  const labels = [...new Set(docs.map(d => d[0]))]
+  const m = Object.fromEntries(labels.map(a => [a, Object.fromEntries(labels.map(b => [b, 0]))]))
+  docs.forEach(([y], i) => m[y][preds[i]]++)
+  const per = labels.map(c => {
+    const tp = m[c][c], col = labels.reduce((s, r) => s + m[r][c], 0), row = labels.reduce((s, p) => s + m[c][p], 0)
+    const precision = col ? tp / col : 0, recall = row ? tp / row : 0
+    return { label: c, precision, recall, f1: precision + recall ? 2 * precision * recall / (precision + recall) : 0 }
+  })
+  const accuracy = labels.reduce((s, c) => s + m[c][c], 0) / docs.length
+  return { labels, m, per, accuracy }
 }
 
 export function treeToText(n, indent = '') {

@@ -3,7 +3,8 @@ import { MapContainer, TileLayer, Marker, Polyline, GeoJSON, Tooltip, useMap, us
 import L from 'leaflet'
 import { ALGORITHMS } from './search.js'
 import { fetchGraph, nearest, prefetchTiles } from './graph.js'
-import { CLASSIFIERS, looAccuracy, treeToText } from './classify.js'
+import { CLASSIFIERS, looPredict, evaluate, treeToText } from './classify.js'
+import { SMALL, STEP_ALGOS, runSteps, openText } from './stepper.js'
 import { DOCS } from './docs.js'
 
 // Icon ghim vẽ bằng CSS: A = điểm đi (xanh), B = điểm đến (đỏ)
@@ -25,6 +26,9 @@ export default function App() {
   const [results, setResults] = useState(null)
   const [algo, setAlgo] = useState('A*')
   const [limit, setLimit] = useState(200)
+  const [wA, setWA] = useState(2) // hệ số Weighted A*
+  const [byTime, setByTime] = useState(false) // tối ưu theo thời gian thay vì quãng đường
+  const [resTime, setResTime] = useState(false) // kết quả hiện tại tính theo thời gian?
   const [status, setStatus] = useState('')
   const [province, setProvince] = useState(null)
   const [mode, setMode] = useState('start') // click bản đồ đang chọn điểm nào
@@ -77,7 +81,8 @@ export default function App() {
         if (data.name !== 'IDS' && !res.IDS) setStatus('Đang chạy IDS (có thể mất vài chục giây với quãng đường dài)...')
       }
       w.onerror = e => setStatus('Lỗi: ' + e.message)
-      w.postMessage({ g: { lat: g.lat, lon: g.lon, adj: g.adj }, s, t, limit: +limit })
+      setResTime(byTime)
+      w.postMessage({ g: { lat: g.lat, lon: g.lon, adj: g.adj }, s, t, limit: +limit, w: +wA, byTime })
     } catch (e) {
       setStatus('Lỗi: ' + e.message)
     }
@@ -103,7 +108,7 @@ export default function App() {
   const searching = step < total
   const done = r => step >= r.tree.length / 2
   const progress = r => Math.round(r.expanded * Math.min(1, step / (r.tree.length / 2 || 1)))
-  const km = r => (r.cost / 1000).toFixed(2) + ' km'
+  const km = r => (r.dist / 1000).toFixed(2) + ' km' + (resTime ? ` · ${(r.cost / 60).toFixed(1)} phút` : '')
   const best = results && Math.min(Infinity, ...Object.values(results).map(r => r.cost))
 
   return (
@@ -111,9 +116,10 @@ export default function App() {
       <aside>
         <nav>
           <button className={tab === 'route' ? 'on' : ''} onClick={() => setTab('route')}>Tìm đường</button>
-          <button className={tab === 'cls' ? 'on' : ''} onClick={() => setTab('cls')}>Phân loại tài liệu</button>
+          <button className={tab === 'step' ? 'on' : ''} onClick={() => setTab('step')}>Từng bước</button>
+          <button className={tab === 'cls' ? 'on' : ''} onClick={() => setTab('cls')}>Phân loại</button>
         </nav>
-        {tab === 'route' ? <>
+        {tab === 'step' ? <StepGuide /> : tab === 'route' ? <>
           <PlaceInput label="A · Điểm đi" bbox={province?.boundingbox} value={start} onPick={p => { setStart(p); reset() }} />
           <PlaceInput label="B · Điểm đến" bbox={province?.boundingbox} value={end} onPick={p => { setEnd(p); reset() }} />
           <div className="modes">Click bản đồ để chọn:
@@ -124,24 +130,35 @@ export default function App() {
           <label className="row">Giới hạn độ sâu DLS
             <input type="number" min="1" value={limit} onChange={e => setLimit(e.target.value)} />
           </label>
+          <label className="row">Hệ số w của Weighted A*
+            <input type="number" min="1" step="0.5" value={wA} onChange={e => setWA(e.target.value)} />
+          </label>
+          <label className="row">Tối ưu theo
+            <select value={byTime ? 't' : 'd'} onChange={e => setByTime(e.target.value === 't')}>
+              <option value="d">Quãng đường (km)</option>
+              <option value="t">Thời gian (phút)</option>
+            </select>
+          </label>
+          {byTime && <p className="hint">Tốc độ giả định theo loại đường: cao tốc 80, quốc lộ 60–70, tỉnh lộ 50, đường huyện 40, khu dân cư 25 km/h. Heuristic = chim bay ÷ 80 km/h (tốc độ lớn nhất) nên vẫn chấp nhận được.</p>}
           <button className="primary" disabled={!start || !end || status.startsWith('Đang tải')} onClick={run}>Tìm đường</button>
           {status && <p className="status">{status}</p>}
           {bg > 0 && <p className="hint">Đang tải ngầm bản đồ vùng đang xem: còn {bg} ô...</p>}
           {results && <table>
-            <thead><tr><th>Thuật toán</th><th>km</th><th>Đỉnh mở rộng</th><th>ms</th></tr></thead>
+            <thead><tr><th>Thuật toán</th><th>km</th>{resTime && <th>phút</th>}<th>Đỉnh mở rộng</th><th>ms</th></tr></thead>
             <tbody>{Object.keys(ALGORITHMS).map(name => { const r = results[name]
-              return !r ? <tr key={name}><td>{name}</td><td colSpan="3">đang chạy...</td></tr> :
+              return !r ? <tr key={name}><td>{name}</td><td colSpan={resTime ? 4 : 3}>đang chạy...</td></tr> :
               <tr key={name} className={name === algo ? 'sel' : name === cmp ? 'cmp' : ''}
                 onClick={() => { setAlgo(name); if (name === cmp) setCmp(''); setReplay(x => x + 1) }}>
                 <td>{name}{r.path && Math.abs(r.cost - best) < 1e-6 && ' ★'}</td>
-                <td>{r.path ? (r.cost / 1000).toFixed(2) : '—'}</td>
+                <td>{r.path ? (r.dist / 1000).toFixed(2) : '—'}</td>
+                {resTime && <td>{r.path ? (r.cost / 60).toFixed(1) : '—'}</td>}
                 <td>{r.expanded}</td>
                 <td>{r.ms.toFixed(1)}</td>
               </tr> })}
             </tbody>
           </table>}
           {results && <Bars results={results} algo={algo} cmp={other && cmp} />}
-          {results && <p className="hint">★ = ngắn nhất. Click một dòng để xem quá trình tìm kiếm của thuật toán đó; chọn "So sánh với" để vẽ chồng thêm một thuật toán (màu tím).</p>}
+          {results && <p className="hint">★ = {resTime ? 'nhanh nhất' : 'ngắn nhất'}. Click một dòng để xem quá trình tìm kiếm của thuật toán đó; chọn "So sánh với" để vẽ chồng thêm một thuật toán (màu tím).</p>}
           {results && <label className="row">So sánh với
             <select value={cmp} onChange={e => { setCmp(e.target.value); setReplay(x => x + 1) }}>
               <option value="">Không</option>
@@ -162,6 +179,7 @@ export default function App() {
       </aside>
 
       <div className="mapwrap">
+      {tab === 'step' && <Stepper />}
       <Legend graph={graph} algo={sel && algo} cmp={other && cmp} />
       <MapContainer center={BMT} zoom={13} className="map" preferCanvas>
         <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -296,13 +314,15 @@ function PlaceInput({ label, value, onPick, bbox }) {
 let trained
 const train = () => trained ??= {
   models: Object.fromEntries(Object.entries(CLASSIFIERS).map(([n, f]) => [n, f(DOCS)])),
-  acc: Object.fromEntries(Object.entries(CLASSIFIERS).map(([n, f]) => [n, looAccuracy(f, DOCS)])),
+  ev: Object.fromEntries(Object.entries(CLASSIFIERS).map(([n, f]) => [n, evaluate(DOCS, looPredict(f, DOCS))])),
 }
 
 function Classifier() {
   const [text, setText] = useState('')
   const [preds, setPreds] = useState(null)
-  const { models, acc } = train()
+  const [cm, setCm] = useState('Naive Bayes') // mô hình đang xem ma trận nhầm lẫn
+  const { models, ev } = train()
+  const e = ev[cm], pct = x => (x * 100).toFixed(0) + '%'
 
   return <>
     <p className="hint">Huấn luyện trên {DOCS.length} tài liệu mẫu ({[...new Set(DOCS.map(d => d[0]))].join(', ')}).</p>
@@ -312,9 +332,95 @@ function Classifier() {
     <table>
       <thead><tr><th>Mô hình</th><th>Độ chính xác (LOO)</th><th>Dự đoán</th></tr></thead>
       <tbody>{Object.keys(models).map(n =>
-        <tr key={n}><td>{n}</td><td>{(acc[n] * 100).toFixed(0)}%</td><td>{preds?.[n] ?? '—'}</td></tr>)}
+        <tr key={n} className={n === cm ? 'sel' : ''} onClick={() => setCm(n)}><td>{n}</td><td>{pct(ev[n].accuracy)}</td><td>{preds?.[n] ?? '—'}</td></tr>)}
       </tbody>
+    </table>
+    <p className="hint">Ma trận nhầm lẫn (LOO) của <b>{cm}</b>, click dòng trên để đổi mô hình. Hàng = nhãn thật, cột = dự đoán.</p>
+    <table className="cm">
+      <thead><tr><th></th>{e.labels.map(l => <th key={l}>{l}</th>)}</tr></thead>
+      <tbody>{e.labels.map(r => <tr key={r}><th>{r}</th>{e.labels.map(c =>
+        <td key={c} className={e.m[r][c] ? (r === c ? 'ok' : 'bad') : ''}>{e.m[r][c]}</td>)}</tr>)}</tbody>
+    </table>
+    <table>
+      <thead><tr><th>Nhãn</th><th>Precision</th><th>Recall</th><th>F1</th></tr></thead>
+      <tbody>{e.per.map(p => <tr key={p.label}><td>{p.label}</td><td>{pct(p.precision)}</td><td>{pct(p.recall)}</td><td>{pct(p.f1)}</td></tr>)}</tbody>
     </table>
     <details><summary>Xem cây quyết định</summary><pre>{treeToText(models['Decision Tree'].tree)}</pre></details>
   </>
+}
+
+function StepGuide() {
+  return <>
+    <p className="hint">Chạy thuật toán trên đồ thị nhỏ 7 đỉnh để thấy rõ tập biên (Open) và tập đã xét (Closed) thay đổi sau mỗi bước. Đi từ <b>S</b> đến <b>G</b>; số trên cạnh là chi phí, <b>h</b> dưới mỗi đỉnh là ước lượng chi phí còn lại đến G (chấp nhận được và nhất quán).</p>
+    <ul className="hint guide">
+      <li><i style={{ background: '#f97316' }} />Đỉnh vừa lấy ra để mở rộng</li>
+      <li><i style={{ background: '#bfdbfe', border: '2px solid #2563eb' }} />Đỉnh trong Open (đang chờ)</li>
+      <li><i style={{ background: '#cbd5e1' }} />Đỉnh trong Closed (đã mở rộng)</li>
+      <li><i style={{ background: '#2563eb', height: 4 }} />Cạnh của cây tìm kiếm</li>
+      <li><i style={{ background: '#facc15', height: 6 }} />Đường đi tìm được</li>
+    </ul>
+    <p className="hint">Gợi ý so sánh: BFS ra S-B-G (ít cạnh nhất nhưng chi phí 9); DFS đi vòng S-C-E-G (14); Greedy bị h(B) = 4 dụ sang B; UCS và A* cùng ra S-A-D-G (tối ưu, 6) nhưng A* chỉ mở rộng 4 đỉnh thay vì 7; DLS với l = 1 không tìm thấy; IDS lặp lại các tầng nông qua từng vòng.</p>
+  </>
+}
+
+// Chạy từng bước trên đồ thị nhỏ (phủ lên bản đồ, bản đồ vẫn giữ nguyên trạng thái bên dưới)
+function Stepper() {
+  const [algo, setAlgo] = useState('A*')
+  const [limit, setLimit] = useState(2)
+  const [w, setW] = useState(2)
+  const [i, setI] = useState(0)
+  const [play, setPlay] = useState(false)
+  const run = useMemo(() => runSteps(algo, { limit: +limit, w: +w }), [algo, limit, w])
+  useEffect(() => { setI(0); setPlay(false) }, [run])
+  useEffect(() => {
+    if (!play) return
+    if (i >= run.steps.length - 1) return setPlay(false)
+    const id = setTimeout(() => setI(i + 1), 1200)
+    return () => clearTimeout(id)
+  }, [play, i, run])
+
+  const st = run.steps[Math.min(i, run.steps.length - 1)], last = i >= run.steps.length - 1
+  const inOpen = new Set(st.open.map(o => o.n)), inClosed = new Set(st.closed)
+  const onTree = new Set(st.tree.map(e => e.join())), onPath = new Set()
+  if (last && run.path) run.path.slice(1).forEach((v, k) => onPath.add(run.path[k] + ',' + v))
+  const has = (set, a, b) => set.has(a + ',' + b) || set.has(b + ',' + a)
+  const N = SMALL.nodes
+  const fill = n => n === st.u ? '#f97316' : inClosed.has(n) ? '#cbd5e1' : inOpen.has(n) ? '#bfdbfe' : '#fff'
+
+  return <div className="stepper">
+    <div className="ctl">
+      <select value={algo} onChange={e => setAlgo(e.target.value)}>{STEP_ALGOS.map(a => <option key={a}>{a}</option>)}</select>
+      {algo === 'DLS' && <label className="row">Giới hạn l <input type="number" min="0" max="6" value={limit} onChange={e => setLimit(e.target.value)} /></label>}
+      {algo === 'Weighted A*' && <label className="row">w <input type="number" min="1" step="0.5" value={w} onChange={e => setW(e.target.value)} /></label>}
+      <button onClick={() => setI(0)} disabled={!i}>⏮ Đầu</button>
+      <button onClick={() => setI(i - 1)} disabled={!i}>◀ Lùi</button>
+      <button className="primary" onClick={() => setPlay(!play)} disabled={last}>{play ? '⏸ Dừng' : '▶ Tự chạy'}</button>
+      <button onClick={() => setI(i + 1)} disabled={last}>Tiếp ▶</button>
+      <button onClick={() => setI(run.steps.length - 1)} disabled={last}>Cuối ⏭</button>
+      <span>Bước {i + 1} / {run.steps.length}{st.iter !== undefined && ` · vòng l = ${st.iter}`}</span>
+    </div>
+    <svg viewBox="0 0 500 310" role="img" aria-label="Đồ thị minh họa">
+      {SMALL.edges.map(([a, b, c]) => {
+        const [x1, y1] = N[a], [x2, y2] = N[b], path = has(onPath, a, b), tree = has(onTree, a, b)
+        return <g key={a + b}>
+          {path && <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#facc15" strokeWidth="12" strokeLinecap="round" />}
+          <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={tree ? '#2563eb' : '#94a3b8'} strokeWidth={tree ? 4 : 2} />
+          <text x={(x1 + x2) / 2} y={(y1 + y2) / 2 - 6} className="w">{c}</text>
+        </g>
+      })}
+      {Object.entries(N).map(([n, [x, y, h]]) => <g key={n}>
+        <circle cx={x} cy={y} r="20" fill={fill(n)} stroke={inOpen.has(n) ? '#2563eb' : '#334155'} strokeWidth={inOpen.has(n) ? 3 : 1.5} />
+        <text x={x} y={y + 5} className="n">{n}</text>
+        <text x={x} y={y + 36} className="h">h={h}</text>
+      </g>)}
+    </svg>
+    <p className="note"><b>Bước {i + 1}:</b> {st.note}</p>
+    {last && <p className="note">{run.path ? <>Kết quả: <b>{run.path.join(' → ')}</b>, chi phí <b>{run.cost}</b>, {run.path.length - 1} cạnh, mở rộng {run.expanded} lượt.</> : <>Không tìm được đường, đã mở rộng {run.expanded} lượt.</>}</p>}
+    <table className="trace">
+      <thead><tr><th>Bước</th>{algo === 'IDS' && <th>l</th>}<th>Lấy ra</th><th>Open sau bước ({algo === 'BFS' ? 'đầu hàng đợi trước' : ['DFS', 'DLS', 'IDS'].includes(algo) ? 'đỉnh ngăn xếp trước' : 'sắp theo f'})</th><th>Closed</th></tr></thead>
+      <tbody>{run.steps.map((x, k) => <tr key={k} className={k === i ? 'sel' : ''} onClick={() => setI(k)}>
+        <td>{k + 1}</td>{algo === 'IDS' && <td>{x.iter}</td>}<td>{x.u}</td><td>{openText(algo, x.open, +w)}</td><td>{x.closed.join(', ')}</td>
+      </tr>)}</tbody>
+    </table>
+  </div>
 }

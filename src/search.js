@@ -147,10 +147,13 @@ function bestFirst(g, s, t, f) {
   return result(g, null, expanded, tree)
 }
 
-const h = (g, t) => v => haversine(g.lat[v], g.lon[v], g.lat[t], g.lon[t])
+// h = khoảng cách chim bay × hScale (chế độ thời gian: hScale = 1 / tốc độ lớn nhất → vẫn chấp nhận được)
+const h = (g, t) => { const k = g.hScale ?? 1; return v => k * haversine(g.lat[v], g.lon[v], g.lat[t], g.lon[t]) }
 
 export const ucs = (g, s, t) => bestFirst(g, s, t, gc => gc)
 export const astar = (g, s, t) => { const H = h(g, t); return bestFirst(g, s, t, (gc, v) => gc + H(v)) }
+// Weighted A*: f = g + w·h, w > 1 → h không còn chấp nhận được, nhanh hơn nhưng chi phí ≤ w × tối ưu
+export const wastar = (g, s, t, w = 2) => { const H = h(g, t); return bestFirst(g, s, t, (gc, v) => gc + w * H(v)) }
 export const greedy = (g, s, t) => { const H = h(g, t); return bestFirst(g, s, t, (_, v) => H(v)) }
 
 export const ALGORITHMS = {
@@ -160,5 +163,6 @@ export const ALGORITHMS = {
   IDS: (g, s, t) => ids(g, s, t),
   UCS: ucs,
   'A*': astar,
+  'Weighted A*': (g, s, t, o) => wastar(g, s, t, o.w ?? 2),
   'Greedy Best-First': greedy,
 }
